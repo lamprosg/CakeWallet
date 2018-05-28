@@ -2,13 +2,19 @@
 //  SecondaryButton.swift
 //  Wallet
 //
-//  Created by FotoLockr on 02.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 02.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
 
 final class SecondaryButton: UIButton {
+    init(image: UIImage) {
+        super.init(frame: .zero)
+        setImage(image, for: .normal)
+        configureView()
+    }
+    
     init(title: String) {
         super.init(frame: .zero)
         setTitle(title, for: .normal)

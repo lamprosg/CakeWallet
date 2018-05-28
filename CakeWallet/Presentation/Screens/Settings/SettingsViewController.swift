@@ -2,8 +2,8 @@
 //  SettingsViewController.swift
 //  Wallet
 //
-//  Created by FotoLockr on 01.11.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 01.11.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -11,7 +11,21 @@ import FontAwesome_swift
 
 final class SettingsViewController: BaseViewController<SettingsView>, UITableViewDelegate, UITableViewDataSource {
     enum SettingsSections: Int {
-        case personal, wallets
+//        case donation, wallets, personal, advanced, contactUs
+        
+        case wallets, personal, advanced, contactUs
+    }
+    
+    struct SettingsTextViewCellItem: CellItem {
+        let attributedString: NSAttributedString
+        
+        init(attributedString: NSAttributedString) {
+            self.attributedString = attributedString
+        }
+        
+        func setup(cell: TextViewUITableViewCell) {
+            cell.configure(attributedText: attributedString)
+        }
     }
     
     struct SettingsCellItem: CellItem {
@@ -68,19 +82,27 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
         let image: UIImage?
         let pickerOptions: [PickerItem]
         let action: ((PickerItem) -> Void)?
+        let onFinish: ((PickerItem) -> Void)?
         private var selectedIndex: Int
         
-        init(title: String, image: UIImage? = nil, pickerOptions: [PickerItem], selectedAtIndex: Int, action: ((PickerItem) -> Void)? = nil) {
+        init(title: String,
+             image: UIImage? = nil,
+             pickerOptions: [PickerItem],
+             selectedAtIndex: Int,
+             action: ((PickerItem) -> Void)? = nil,
+             onFinish: ((PickerItem) -> Void)? = nil) {
             self.title = title
             self.image = image
             self.action = action
             self.pickerOptions = pickerOptions
             self.selectedIndex = selectedAtIndex
+            self.onFinish = onFinish
         }
         
         func setup(cell: SettingsPickerUITableViewCell<PickerItem>) {
             cell.configure(title: title, pickerOptions: pickerOptions, selectedOption: selectedIndex, action: action)
             cell.imageView?.image = image
+            cell.onFinish = onFinish
         }
     }
     
@@ -89,29 +111,43 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
     var presentChangePasswordScreen: VoidEmptyHandler
     var presentNodeSettingsScreen: VoidEmptyHandler
     var presentWalletsScreen: VoidEmptyHandler
-    
+    var presentWalletKeys: VoidEmptyHandler
+    var presentWalletSeed: VoidEmptyHandler
+    var presentDonation: VoidEmptyHandler
     
     private var sections: [SettingsSections: [CellAnyItem]]
-    private var accountSettings: AccountSettingsConfigurable
+    private var accountSettings: AccountSettingsConfigurable & CurrencySettingsConfigurable
+    private var showSeedIsAllow: Bool
     
-    init(accountSettings: AccountSettingsConfigurable) {
+    init(accountSettings: AccountSettingsConfigurable & CurrencySettingsConfigurable, showSeedIsAllow: Bool) {
         self.accountSettings = accountSettings
-        self.sections = [.personal: [], .wallets: []]
+        self.showSeedIsAllow = showSeedIsAllow
+        self.sections = [.wallets: [], .personal: []]
         super.init()
+    }
+    
+    override func configureDescription() {
+        title = "Settings"
+        updateTabBarIcon(name: .cog)
     }
 
     override func configureBinds() {
-        title = "Settings"
-        contentView.table.register(items: [SettingsCellItem.self, SettingsPickerCellItem<TransactionPriority>.self])
+        contentView.table.register(items: [
+            SettingsCellItem.self,
+            SettingsPickerCellItem<TransactionPriority>.self,
+            SettingsPickerCellItem<Currency>.self,
+            SettingsTextViewCellItem.self])
         contentView.table.delegate = self
         contentView.table.dataSource = self
         
+        if
+            let dictionary = Bundle.main.infoDictionary,
+            let version = dictionary["CFBundleShortVersionString"] as? String {
+            contentView.footerLabel.text = "Version \(version)"
+        }
+        
         let biometricAuthSwitcher = SettingsSwitchCellItem(
             title: "Allow biometric authentication",
-            image: UIImage.fontAwesomeIcon(
-                name: .idCard,
-                textColor: UIColor(hex: 0x2D93AD), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
             isOn: accountSettings.isBiometricalAuthAllow,
             action: { [weak self] isOn in
                 self?.accountSettings.isBiometricalAuthAllow = isOn
@@ -119,10 +155,6 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
         
         let rememberPasswordSwitcher = SettingsSwitchCellItem(
             title: "Remember pin",
-            image: UIImage.fontAwesomeIcon(
-                name: .eye,
-                textColor: UIColor(hex: 0x2D93AD), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
             isOn: accountSettings.isPasswordRemembered) { [weak self] isOn in
                 self?.accountSettings.isPasswordRemembered = isOn
         }
@@ -131,10 +163,6 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
         
         let feePriorityPicker = SettingsPickerCellItem<TransactionPriority>(
             title: "Fee priority",
-            image: UIImage.fontAwesomeIcon(
-                name: .flag,
-                textColor: UIColor(hex: 0x2D93AD), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
             pickerOptions: options,
             selectedAtIndex: options.index(of: accountSettings.transactionPriority) ?? 0) { [weak self] pickedItem in
                 self?.accountSettings.transactionPriority = pickedItem
@@ -142,41 +170,85 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
         
         let changePin = SettingsCellItem(
             title: "Change pin",
-            image: UIImage.fontAwesomeIcon(
-                name: .unlockAlt,
-                textColor: UIColor(hex: 0x2D93AD), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
             action: { [weak self] in
                 self?.presentChangePasswordScreen?()
         })
         
         let nodeSettings = SettingsCellItem(
             title: "Daemon settings",
-            image: UIImage.fontAwesomeIcon(
-                name: .terminal,
-                textColor: UIColor(hex: 0x2D93AD), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
             action: { [weak self] in
                 self?.presentNodeSettingsScreen?()
         })
         
+        let currencyPicker = SettingsPickerCellItem<Currency>(
+            title: "Currency",
+            pickerOptions: Currency.all,
+            selectedAtIndex: Currency.all.index(of: accountSettings.currency) ?? Configurations.defaultCurreny.rawValue,
+            onFinish:  { [weak self] pickedItem in
+                self?.accountSettings.currency = pickedItem
+        })
+        
         sections[.personal] = [
             changePin,
-            nodeSettings,
             biometricAuthSwitcher,
-            rememberPasswordSwitcher,
-            feePriorityPicker
+            rememberPasswordSwitcher
         ]
         
-        sections[.wallets] = [SettingsCellItem(
-            title: "Wallets",
-            image: UIImage.fontAwesomeIcon(
-                name: .addressBook,
-                textColor: UIColor(hex: 0xFDE74C), // FIX-ME: Unnamed constant
-                size: CGSize(width: 32, height: 32)),
+        let wallets = SettingsCellItem(
+            title: "Add or switch wallets",
             action: { [weak self] in
                 self?.presentWalletsScreen?()
-        })]
+        })
+        
+        let showKeys = SettingsCellItem(
+            title: "Show keys",
+            action: { [weak self] in
+                self?.presentWalletKeys?()
+        })
+        
+        sections[.wallets] = [wallets, showKeys]
+        
+        if showSeedIsAllow {
+            let showSeed = SettingsCellItem(
+                title: "Show seed",
+                action: { [weak self] in
+                    self?.presentWalletSeed?()
+            })
+            
+            sections[.wallets]?.append(showSeed)
+        }
+        
+        sections[.wallets]?.append(currencyPicker)
+        sections[.wallets]?.append(feePriorityPicker)
+        
+//        let supportUs = SettingsCellItem(
+//            title: "Please donate to support us!",
+//            action:  { [weak self] in
+//                self?.presentDonation?()
+//        })
+//
+//        sections[.donation] = [supportUs]
+        sections[.advanced] = [nodeSettings]
+        
+        let email = "info@caketech.io"
+        let telegram = "https://t.me/cake_wallet"
+        let twitter = "cakewalletXMR"
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.paragraphSpacing = 5
+        paragraphStyle.lineSpacing = 5
+        let attributes = [
+            NSAttributedStringKey.font : UIFont.avenirNextMedium(size: 15),
+            NSAttributedStringKey.paragraphStyle: paragraphStyle
+        ]
+        let attributedString = NSMutableAttributedString(string: "Email: \(email)\nTelegram: \(telegram)\nTwitter: @\(twitter)", attributes: attributes)
+        let telegramAddressRange = attributedString.mutableString.range(of: telegram)
+        attributedString.addAttribute(.link, value: telegram, range: telegramAddressRange)
+        let twitterAddressRange = attributedString.mutableString.range(of: "@\(twitter)")
+        attributedString.addAttribute(.link, value: "https://twitter.com/\(twitter)", range: twitterAddressRange)
+        let emailAddressRange = attributedString.mutableString.range(of: email)
+        attributedString.addAttribute(.link, value: "mailto:\(email)", range: emailAddressRange)
+        
+        sections[.contactUs] = [SettingsTextViewCellItem(attributedString: attributedString)]
     }
     
     // MARK: UITableViewDataSource
@@ -201,14 +273,34 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
             let item = sections[section]?[indexPath.row] else {
                 return UITableViewCell()
         }
-        
         let cell = tableView.dequeueReusableCell(withItem: item, for: indexPath)
+        cell.textLabel?.font = UIFont.avenirNextMedium(size: 15)
         return cell
     }
     
     // MARK: UITableViewDelegate
     
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard
+            let section = SettingsSections(rawValue: indexPath.section),
+            section != .contactUs else {
+            return 100
+        }
+        
+        return 50
+    }
+    
+    func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+//        guard let section = SettingsSections(rawValue: section) else {
+//            return 0
+//        }
+        
+//        if section != .donation {
+//            return 50
+//        } else {
+//            return 0
+//        }
+        
         return 50
     }
     
@@ -220,17 +312,23 @@ final class SettingsViewController: BaseViewController<SettingsView>, UITableVie
         let view = UIView(frame:
             CGRect(
                 origin: .zero,
-                size: CGSize(width: tableView.frame.width, height: tableView.sectionHeaderHeight)))
+                size: CGSize(width: tableView.frame.width, height: 50)))
         let titleLabel = UILabel(frame: CGRect(origin: CGPoint(x: 20, y: 0), size: CGSize(width: view.frame.width - 20, height: view.frame.height)))
         titleLabel.font = UIFont.avenirNextMedium(size: 17)
-        view.backgroundColor = .clear
+        view.backgroundColor =  contentView.backgroundColor
         view.addSubview(titleLabel)
         
         switch section {
         case .personal:
-            titleLabel.text = "Personal" // FIX-ME: Unnamed constant
+            titleLabel.text = "Personal"
         case .wallets:
-            titleLabel.text = "Wallets" // FIX-ME: Unnamed constant
+            titleLabel.text = "Wallets"
+        case .advanced:
+            titleLabel.text = "Advanced"
+        case .contactUs:
+            titleLabel.text = "Contact us"
+        default:
+            return nil
         }
         
         return view

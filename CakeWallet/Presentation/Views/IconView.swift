@@ -2,8 +2,8 @@
 //  IconView.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 26.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 26.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import UIKit
@@ -20,7 +20,7 @@ final class IconView: UIView {
         
         self.init(iconImage: UIImage.fontAwesomeIcon(
             name: fontAwesomeIcon,
-            textColor: UIColor(hex: 0xF5F7F9),
+            textColor: .whiteSmoke,
             size: IconView.defaultImageSize))
     }
     
@@ -51,7 +51,7 @@ final class IconView: UIView {
         
         // FIX-ME: Unnamed constant
         
-        backgroundColor = UIColor(hex: 0x2AB7CA) // UIColor(hex: 0x011627)
+        backgroundColor = .pictonBlue
         addSubview(imageView)
     }
     
@@ -59,8 +59,16 @@ final class IconView: UIView {
         imageView.snp.makeConstraints { make in
             make.centerY.equalToSuperview()
             make.centerX.equalToSuperview()
+//            make.leading.equalToSuperview()
+//            make.trailing.equalToSuperview()
+//            make.top.equalToSuperview()
+//            make.bottom.equalToSuperview()
             make.size.equalTo(imageSize)
         }
+        
+//        snp.makeConstraints { make in
+//            make.size.equalTo(imageView.snp.size)
+//        }
     }
 }
 
@@ -72,6 +80,7 @@ extension IconView {
     }
     
     func pulsate() {
+        stopPulsate()
         let pulse = CASpringAnimation(keyPath: "transform.scale")
         pulse.duration = 1.35
         pulse.fromValue = 0.85
@@ -89,6 +98,7 @@ extension IconView {
     }
     
     func rotate() {
+        stopRotate()
         let rotationAnimation = CABasicAnimation(keyPath: "transform.rotation")
         rotationAnimation.fromValue = 0.0
         rotationAnimation.toValue = Double.pi
@@ -100,36 +110,5 @@ extension IconView {
     
     func stopRotate() {
         layer.removeAnimation(forKey: "rotation")
-    }
-    
-    func flash() {
-        let flash = CABasicAnimation(keyPath: "opacity")
-        flash.duration = 0.2
-        flash.fromValue = 1
-        flash.toValue = 0.1
-        flash.timingFunction = CAMediaTimingFunction(name: kCAMediaTimingFunctionEaseInEaseOut)
-        flash.autoreverses = true
-        flash.repeatCount = 3
-        
-        layer.add(flash, forKey: nil)
-    }
-    
-    
-    func shake() {
-        let shake = CABasicAnimation(keyPath: "position")
-        shake.duration = 0.05
-        shake.repeatCount = 2
-        shake.autoreverses = true
-        
-        let fromPoint = CGPoint(x: center.x - 5, y: center.y)
-        let fromValue = NSValue(cgPoint: fromPoint)
-        
-        let toPoint = CGPoint(x: center.x + 5, y: center.y)
-        let toValue = NSValue(cgPoint: toPoint)
-        
-        shake.fromValue = fromValue
-        shake.toValue = toValue
-        
-        layer.add(shake, forKey: "position")
     }
 }

@@ -2,8 +2,8 @@
 //  AccountImpl.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 30.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 30.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import PromiseKit
@@ -14,7 +14,6 @@ final class AccountImpl: Account {
     }
     
     var currentWalletName: String? {
-        // FIX-ME: Unnamed constant
         return UserDefaults.standard.string(forKey: Configurations.DefaultsKeys.currentWalletName)
     }
     
@@ -42,7 +41,11 @@ final class AccountImpl: Account {
     
     var transactionPriority: TransactionPriority {
         get {
-            return TransactionPriority(rawValue: UInt64(UserDefaults.standard.integer(forKey: Configurations.DefaultsKeys.transactionPriority))) ?? .default
+            if UserDefaults.standard.value(forKey: Configurations.DefaultsKeys.transactionPriority.stringify()) == nil {
+                return .slow
+            }
+            
+            return TransactionPriority(rawValue: UInt64(UserDefaults.standard.integer(forKey: Configurations.DefaultsKeys.transactionPriority))) ?? .slow
         }
         
         set {
@@ -50,17 +53,51 @@ final class AccountImpl: Account {
         }
     }
     
+    var autoSwitchNode: Bool {
+        get {
+            if UserDefaults.standard.value(forKey: Configurations.DefaultsKeys.autoSwitchNode.stringify()) == nil {
+                return false
+            }
+            
+            return UserDefaults.standard.bool(forKey: Configurations.DefaultsKeys.autoSwitchNode)
+        }
+        
+        set {
+            UserDefaults.standard.set(newValue, forKey: Configurations.DefaultsKeys.autoSwitchNode)
+        }
+    }
+    
+    var currency: Currency {
+        get {
+            // WARNING: Unsafe unwrap
+            return Currency(rawValue: UserDefaults.standard.integer(forKey: Configurations.DefaultsKeys.currency))!
+        }
+        
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: Configurations.DefaultsKeys.currency)
+            _ = forceUpdateRate()
+        }
+    }
+    
     var connectionSettings: ConnectionSettings {
         return ConnectionSettings.loadSavedSettings()
-            ?? ConnectionSettings(uri: "", login: "", password: "")
     }
     
     let keychainStorage: KeychainStorage
     private let proxyWallet: WalletProxy
+    private var lastCurrencyRateUpdate: Date?
+    private var currencyRate: Double {
+        didSet {
+            rateChangeSubscriber.forEach({ $0(currencyRate) })
+        }
+    }
+    private var rateChangeSubscriber: [(Double) -> Void]
     
     init(keychainStorage: KeychainStorage, proxyWallet: WalletProxy) {
         self.keychainStorage = keychainStorage
         self.proxyWallet = proxyWallet
+        rateChangeSubscriber = []
+        currencyRate = 1
     }
     
     func walletsList() -> Promise<WalletsList> {
@@ -111,8 +148,13 @@ final class AccountImpl: Account {
     }
     
     func change(connectionSettings: ConnectionSettings) -> Promise<Void> {
-        connectionSettings.save()
         return currentWallet.connect(withSettings: connectionSettings)
+            .then { _ in connectionSettings.save() }
+    }
+    
+    func resetConnectionSettings() -> ConnectionSettings {
+        UserDefaults.standard.set(Configurations.defaultNodeUri, forKey: Configurations.DefaultsKeys.nodeUri)
+        return ConnectionSettings.loadSavedSettings()
     }
     
     func loadCurrentWallet() -> Promise<Void> {
@@ -121,5 +163,88 @@ final class AccountImpl: Account {
         }
         
         return wallets().loadWallet(withName: name)
+    }
+    
+    func isAuthenticated() -> Bool {
+        if let _ = proxyWallet.origin as? EmptyWallet {
+            return false
+        } else {
+            return true
+        }
+    }
+    
+    func rate() -> Promise<Double> {
+        return Promise { fulfill, reject  in
+            guard currency != .usd else {
+                self.currencyRate = 1
+                fulfill(self.currencyRate)
+                return
+            }
+            
+            let now = Date()
+            
+            if lastCurrencyRateUpdate == nil {
+                fetchRate(for: self.currency, base: .usd)
+                    .then { currencyRate -> Void in
+                        if currencyRate != 0 {
+                            self.currencyRate = currencyRate
+                        } else {
+                            self.currencyRate = 1
+                        }
+                        
+                        fulfill(self.currencyRate)
+                        self.lastCurrencyRateUpdate = Date()
+                    }.catch { error in
+                        print(error)
+                }
+                return
+            } else if
+                let lastCurrencyRateUpdate = lastCurrencyRateUpdate,
+                now.timeIntervalSince(lastCurrencyRateUpdate) >= 120 {
+                fetchRate(for: self.currency, base: .usd)
+                    .then { currencyRate -> Void in
+                        if currencyRate != 0 {
+                            self.currencyRate = currencyRate
+                        } else {
+                            self.currencyRate = 1
+                        }
+                        
+                        fulfill(self.currencyRate)
+                        self.lastCurrencyRateUpdate = Date()
+                    }.catch { error in
+                        print(error)
+                }
+            } else {
+                fulfill(self.currencyRate)
+            }
+        }
+    }
+    
+    func subscribeOnRateChange(_ subscriber: @escaping (Double) -> Void) {
+        rateChangeSubscriber.append(subscriber)
+    }
+    
+    private func forceUpdateRate() -> Promise<Double> {
+        return Promise { fulfill, reject  in
+            guard currency != .usd else {
+                self.currencyRate = 1
+                fulfill(self.currencyRate)
+                return
+            }
+            
+            fetchRate(for: self.currency, base: .usd)
+                .then { currencyRate -> Void in
+                    if currencyRate != 0 {
+                        self.currencyRate = currencyRate
+                    } else {
+                        self.currencyRate = 1
+                    }
+                    
+                    fulfill(self.currencyRate)
+                    self.lastCurrencyRateUpdate = Date()
+                }.catch { error in
+                    print(error)
+            }
+        }
     }
 }

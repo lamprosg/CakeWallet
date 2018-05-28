@@ -2,8 +2,8 @@
 //  UILabel+extension.swift
 //  Wallet
 //
-//  Created by FotoLockr on 17.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 17.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -108,7 +108,7 @@ extension UILabel {
         }
     }
     
-    convenience init(font: UIFont = UIFont.avenirNext(size: 17)) {
+    convenience init(font: UIFont = UIFont.avenirNext(size: 15)) {
         self.init()
         self.font = font
     }

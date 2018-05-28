@@ -2,8 +2,8 @@
 //  SignInView.swift
 //  Wallet
 //
-//  Created by FotoLockr on 25.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 25.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -18,8 +18,8 @@ final class AddWalletView: BaseView {
     required init() {
         newWalletButton = PrimaryButton(title: "Create a new wallet")
         recoveryWalletButton = SecondaryButton(title: "Recover wallet")
-        orLabel = UILabel(font: UIFont.avenirNextMedium(size: 17))
-        recoveryDescriptionLabel = UILabel(font: UIFont.avenirNextMedium(size: 13))
+        orLabel = UILabel(font: UIFont.avenirNextMedium(size: 15))
+        recoveryDescriptionLabel = UILabel(font: UIFont.avenirNextMedium(size: 12))
         super.init()
     }
     

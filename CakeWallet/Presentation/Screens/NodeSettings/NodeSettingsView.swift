@@ -2,8 +2,8 @@
 //  NodeSettingsView.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 10.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 10.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import UIKit
@@ -13,16 +13,18 @@ final class NodeSettingsView: BaseView {
     let nodePortLabel: UITextField
     let loginLabel: UITextField
     let passwordLabel: UITextField
-    let connectButton: UIButton
+    let saveButton: UIButton
     let descriptionLabel: UILabel
+    let resetSettings: UIButton
     
     required init() {
         nodeAddressLabel = FloatingLabelTextField(placeholder: "Daemon address")
         nodePortLabel = FloatingLabelTextField(placeholder: "Daemon port")
         loginLabel = FloatingLabelTextField(placeholder: "Login (optional)")
         passwordLabel = FloatingLabelTextField(placeholder: "Password (optional)")
-        connectButton = PrimaryButton(title: "Connect")
-        descriptionLabel = UILabel(font: .avenirNextMedium(size: 17))
+        saveButton = PrimaryButton(title: "Connect")
+        descriptionLabel = UILabel(font: .avenirNextMedium(size: 12))
+        resetSettings = SecondaryButton(title: "Reset settings")
         super.init()
     }
     
@@ -35,8 +37,9 @@ final class NodeSettingsView: BaseView {
         addSubview(nodePortLabel)
         addSubview(loginLabel)
         addSubview(passwordLabel)
-        addSubview(connectButton)
+        addSubview(saveButton)
         addSubview(descriptionLabel)
+        addSubview(resetSettings)
     }
     
     override func configureConstraints() {
@@ -72,10 +75,15 @@ final class NodeSettingsView: BaseView {
             make.height.equalTo(descriptionLabel.snp.height)
         }
         
-        connectButton.snp.makeConstraints { make in
-            make.bottom.equalToSuperview().offset(-25)
-            make.leading.equalToSuperview().offset(20)
-            make.trailing.equalToSuperview().offset(-20)
+        resetSettings.snp.makeConstraints { make in
+            make.bottom.equalTo(self.safeAreaLayoutGuide.snp.bottom).offset(-25)
+            make.trailing.equalTo(self.snp.centerX).offset(-10)
+            make.height.equalTo(50)
+        }
+        
+        saveButton.snp.makeConstraints { make in
+            make.bottom.equalTo(self.safeAreaLayoutGuide.snp.bottom).offset(-25)
+            make.leading.equalTo(self.snp.centerX).offset(10)
             make.height.equalTo(50)
         }
     }

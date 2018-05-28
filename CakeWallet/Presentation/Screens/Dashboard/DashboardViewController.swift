@@ -2,8 +2,8 @@
 //  SummaryViewController.swift
 //  Wallet
 //
-//  Created by FotoLockr on 15.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 15.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -12,23 +12,27 @@ import FontAwesome_swift
 final class DashboardViewController: BaseViewController<DashboardView>,
                                      UITableViewDelegate,
                                      UIViewControllerTransitioningDelegate,
-                                     UITableViewDataSource {
+                                     UITableViewDataSource,
+                                     ModalPresentaly {
+    private static let transactionLimit = 5
     var presentSettingsScreen: VoidEmptyHandler
-    var presentSendScreen: VoidEmptyHandler
-    var presentReceiveScreen: VoidEmptyHandler
+    var presentTransactionsList: VoidEmptyHandler
     var presentTransactionDetails: ((TransactionDescription) -> Void)?
     private let wallet: WalletProtocol
+    private let account: Account
     private let rateTicker: RateTicker
     private var transactions: TransactionHistory
-    private var _transactions: [Array<TransactionDescription>.SectionOfTransactions] {
+    private var _transactions: [TransactionDescription] {
         didSet {
             if oldValue != _transactions {
+                contentView.showAllTransactionsButton.isHidden = DashboardViewController.transactionLimit > _transactions.count
                 contentView.tableView.reloadData()
             }
         }
     }
     
-    init(wallet: WalletProtocol, rateTicker: RateTicker) {
+    init(account: Account, wallet: WalletProtocol, rateTicker: RateTicker) {
+        self.account = account
         self.wallet = wallet
         self.rateTicker = rateTicker
         self.transactions = EmptyTransactionHistory()
@@ -36,110 +40,98 @@ final class DashboardViewController: BaseViewController<DashboardView>,
         super.init()
     }
     
-    override func configureBinds() {        
-        let showSettingsButton = UIBarButtonItem(
-            image: UIImage.fontAwesomeIcon(
-                name: .cog,
-                textColor: .gray,
-                size: CGSize(width: 36, height: 36)),
-            style: UIBarButtonItemStyle.plain,
-            target: self,
-            action: #selector(onPresentSettings))
-        navigationItem.setRightBarButton(showSettingsButton, animated: false)
-        
+    override func configureDescription() {
+        title = "Dashboard"
+        tabBarItem.image = UIImage(named: "monero-logo-335.png")?.resized(to: CGSize(width: 32, height: 32))
+        tabBarItem.title = "Dashboard"
+    }
+    
+    override func configureBinds() {
+        let onStatusButtonGesture = UITapGestureRecognizer(target: self, action: #selector(reconnect))
         contentView.tableView.delegate = self
         contentView.tableView.dataSource = self
         contentView.tableView.register(TransactionUITableViewCell.self, forCellReuseIdentifier: TransactionUITableViewCell.identifier)
-        contentView.receiveButton.addTarget(self, action: #selector(onPresentReceiveScreen), for: .touchUpInside)
-        contentView.newTransactionButton.addTarget(self, action: #selector(onPresentSendScreen), for: .touchUpInside)
+        contentView.statusViewContainer.iconView.imageView.isUserInteractionEnabled = true
+        contentView.statusViewContainer.iconView.imageView.addGestureRecognizer(onStatusButtonGesture)
+        contentView.showAllTransactionsButton.addTarget(self, action: #selector(showAllTransactionsList), for: .touchUpInside)
+        contentView.showAllTransactionsButton.isHidden = true
         
-        wallet.observe { change, wallet in
+        wallet.observe { [weak self] change, wallet in
             switch change {
             case let .changedStatus(status):
-                self.setStatus(status)
-                self._transactions = wallet.transactionHistory().transactions.toDatesSections()
+                self?.setStatus(status)
+                self?.setTransaction(wallet.transactionHistory().transactions)
             case let .changedUnlockedBalance(unlockedBalance):
-                self.contentView.balanceViewContainer.contentView.unlockedBalance = unlockedBalance.formatted()
+                self?.contentView.balanceViewContainer.contentView.balance = wallet.balance.formatted()
+                self?.contentView.balanceViewContainer.contentView.unlockedBalance = unlockedBalance.formatted()
+                self?.updateRateBalance()
             case let .changedBalance(balance):
-                self.contentView.balanceViewContainer.contentView.balance = balance.formatted()
-                self._transactions = wallet.transactionHistory().transactions.toDatesSections()
-                self.updateRateBalance()
+                self?.contentView.balanceViewContainer.contentView.balance = balance.formatted()
+                self?.contentView.balanceViewContainer.contentView.unlockedBalance = wallet.unlockedBalance.formatted()
+                self?.setTransaction(wallet.transactionHistory().transactions)
+                self?.updateRateBalance()
             case .reset:
-                self.setStatus(wallet.status)
-                self.contentView.balanceViewContainer.contentView.balance = wallet.balance.formatted()
-                self.contentView.balanceViewContainer.contentView.unlockedBalance = wallet.unlockedBalance.formatted()
-                self.contentView.titleViewHeader.title = wallet.name
-                // FIX-ME: Unnamed constant
-                self.contentView.titleViewHeader.subtitle = "Monero"
-                self._transactions = wallet.transactionHistory().transactions.toDatesSections()
-                self.updateRateBalance()
+                self?.setStatus(wallet.status)
+                self?.contentView.balanceViewContainer.contentView.balance = wallet.balance.formatted()
+                self?.contentView.balanceViewContainer.contentView.unlockedBalance = wallet.unlockedBalance.formatted()
+                
+                if wallet.isWatchOnly {
+                    self?.navigationItem.title = "\(wallet.name) (watch-only)"
+                } else {
+                    self?.navigationItem.title = wallet.name
+                }
+                
+                self?.setTransaction(wallet.transactionHistory().transactions)
+                self?.updateRateBalance()
             default:
                 break
             }
         }
         
-        rateTicker.add { [weak self] _ in
+        rateTicker.add { [weak self] currency, _ in
+            self?.setCurrency(currency)
             self?.updateRateBalance()
         }
     }
     
-    func presentModal(_ viewController: UIViewController) {
-        viewController.modalPresentationStyle = .custom
-        viewController.transitioningDelegate = self
-       
-        self.present(viewController, animated: true)
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        setCurrency(account.currency)
+        updateRateBalance()
+        setStatus(wallet.status)
     }
     
     // MARK: UITableViewDataSource
     
     func numberOfSections(in tableView: UITableView) -> Int {
-        return _transactions.count
+        return 1
     }
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return _transactions[section].items.count
+        return _transactions.count > DashboardViewController.transactionLimit ? DashboardViewController.transactionLimit : _transactions.count
     }
     
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let item = _transactions[indexPath.section].items[indexPath.row]
+        let item = _transactions[indexPath.row]
         let cell = tableView.dequeueReusableCell(withItem: item, for: indexPath)
+        
+        if let cell = cell as? TransactionDescription.CellType {
+            cell.short()
+        }
+        
         return cell
     }
     
     // MARK: UITableViewDelegate
     
-    func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        let view = UIView()
-        let label = UILabel(font: .avenirNextMedium(size: 19))
-        let title: String
-        let date = _transactions[section].date
-        
-        if Calendar.current.isDateInToday(date) {
-            title = "Today"
-        } else if Calendar.current.isDateInYesterday(date) {
-            title = "Yesterday"
-        } else {
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "EEEE, MMM d"
-            title = dateFormatter.string(from: date)
-        }
-
-        label.text = title
-        label.textColor = UIColor(hex: 0x303030) // FIX-ME: Unnamed constant
-        view.backgroundColor = tableView.backgroundColor
-        view.addSubview(label)
-        label.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(10)
-            make.centerY.equalToSuperview()
-        }
-        
-        return view
-    }
-    
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let transaction = _transactions[indexPath.section].items[indexPath.row]
+        let transaction = _transactions[indexPath.row]
         presentTransactionDetails?(transaction)
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+    
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return 50
     }
     
     // MARK: UIViewControllerTransitioningDelegate
@@ -152,6 +144,19 @@ final class DashboardViewController: BaseViewController<DashboardView>,
         return halfSizePresentationController
     }
     
+    @objc
+    private func showAllTransactionsList() {
+        presentTransactionsList?()
+    }
+    
+    private func setTransaction(_ transactions: [TransactionDescription]) {
+        _transactions = transactions.sorted(by: {  $0.date > $1.date })
+    }
+    
+    private func setCurrency(_ currency: Currency) {
+        contentView.balanceViewContainer.contentView.setCurrency(currency)
+    }
+    
     private func updateRateBalance() {
         let rateBalance = convertXMRtoUSD(amount: wallet.balance.formatted(), rate: rateTicker.rate)
         contentView.balanceViewContainer.contentView.alternativeBalance = rateBalance
@@ -160,29 +165,18 @@ final class DashboardViewController: BaseViewController<DashboardView>,
     private func setStatus(_ status: NetworkStatus) {
         self.contentView.statusViewContainer.contentView.update(status: status)
         let iconView = contentView.statusViewContainer.iconView
-        
+
         switch status {
-        case .connecting, .startUpdating, .updating(_), .failedConnection(_):
+        case .connecting, .startUpdating, .updating(_):
             if !iconView.isRoutating {
                 iconView.rotate()
             }
+        case .failedConnection(_), .failedConnectionNext, .notConnected:
+            contentView.statusViewContainer.iconView.pulsate()
+            contentView.statusViewContainer.iconView.stopRotate()
         default:
             iconView.stopRotate()
         }
-    }
-    
-    @objc
-    private func onPresentReceiveScreen() {
-        if wallet.isReadyToReceive {
-            presentReceiveScreen?()
-        } else {
-            showWarningOnReceive()
-        }
-    }
-    
-    @objc
-    private func onPresentSendScreen() {
-        presentSendScreen?()
     }
     
     @objc
@@ -190,89 +184,45 @@ final class DashboardViewController: BaseViewController<DashboardView>,
         presentSettingsScreen?()
     }
     
+    @objc
+    private func reconnect() {
+        let alert = UIAlertController(title: "Reconnect ?", message: nil, preferredStyle: .alert)
+        let okAction = UIAlertAction(title: "Yes", style: .default) { [weak self] _ in
+            guard let connectionSettings = self?.account.connectionSettings else {
+                return
+            }
+            let __alert = UIAlertController(title: nil, message: "Connecting", preferredStyle: .alert)
+            self?.present(__alert, animated: true)
+            self?.wallet.connect(withSettings: connectionSettings, updateState: true)
+                .then { _ -> Void in
+                    __alert.dismiss(animated: true)
+                }.catch { error in
+                    __alert.dismiss(animated: true) {
+                        print(error)
+                        let _alert = UIAlertController(title: "Connection problems", message: "Cannot connect to remote node. Please switch to another.", preferredStyle: .alert)
+                        _alert.modalPresentationStyle = .overFullScreen
+                        let switchAction = UIAlertAction(title: "Switch", style: .default) { _ in
+                            let nodeSettingsVC = try! container.resolve() as NodesListViewController
+                            nodeSettingsVC.modalPresentationStyle = .overFullScreen
+                            let navController = UINavigationController(rootViewController: nodeSettingsVC)
+                            self?.present(navController, animated: true)
+                        }
+                        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel)
+                        _alert.addAction(switchAction)
+                        _alert.addAction(cancelAction)
+                        self?.present(_alert, animated: true)
+                    }
+            }
+        }
+        let cancelAction = UIAlertAction(title: "No", style: .cancel)
+        alert.addAction(okAction)
+        alert.addAction(cancelAction)
+        present(alert, animated: true)
+    }
+    
     private func showWarningOnReceive() {
         UIAlertController.showInfo(
             message: "Do not send XMR to this address until the update is complete.\nPlease wait.",
             presentOn: self)
-    }
-}
-
-class HalfSizePresentationController: UIPresentationController {
-    static var offsetMultiplier: CGFloat {
-        // FIX-ME: HARDCODE
-        
-        let height = UIScreen.main.bounds.height
-        return height <= 568 ? 0 : 0.4
-    }
-    
-    lazy var backgroundView: UIView = {
-        let view = UIView(
-            frame: CGRect(
-                x: 0,
-                y: 0,
-                width: containerView!.bounds.width,
-                height: containerView!.bounds.height))
-        view.backgroundColor = UIColor.black.withAlphaComponent(0.3)
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(hide))
-        view.addGestureRecognizer(tapGesture)
-        return view
-    }()
-    
-    override var frameOfPresentedViewInContainerView: CGRect {
-        let height = containerView!.bounds.height * (1.0 - type(of: self).offsetMultiplier)
-        let x: CGFloat = 0
-        let y = containerView!.bounds.height * type(of: self).offsetMultiplier
-        
-        return CGRect(
-            x: x,
-            y: y,
-            width: containerView!.bounds.width,
-            height: height)
-    }
-    
-    override func presentationTransitionWillBegin() {
-        if let containerView = self.containerView, let coordinator = presentingViewController.transitionCoordinator {
-            backgroundView.alpha = 0
-            containerView.addSubview(backgroundView)
-            
-            if
-                let nav = presentedViewController as? UINavigationController,
-                let vc = nav.viewControllers.last {
-                backgroundView.addSubview(vc.view)
-            } else {
-                backgroundView.addSubview(presentedViewController.view)
-            }
-            
-            coordinator.animate(alongsideTransition: { (context) -> Void in
-                self.backgroundView.alpha = 1
-            })
-        }
-    }
-    
-    override func dismissalTransitionWillBegin() {
-        if let coordinator = presentingViewController.transitionCoordinator {
-            coordinator.animate(alongsideTransition: { (context) -> Void in
-                self.backgroundView.alpha = 0
-            })
-        }
-    }
-    
-    override func dismissalTransitionDidEnd(_ completed: Bool) {
-        guard completed else {
-            return
-        }
-        
-        backgroundView.removeFromSuperview()
-    }
-    
-    @objc
-    func hide() {
-        if let nav = presentedViewController as? UINavigationController {
-            nav.viewControllers.last?.dismiss(animated: true) {
-                nav.viewControllers = []
-            }
-        } else {
-            presentedViewController.dismiss(animated: true)
-        }
     }
 }

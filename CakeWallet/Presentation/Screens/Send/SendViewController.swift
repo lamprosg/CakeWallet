@@ -2,8 +2,8 @@
 //  SendViewController.swift
 //  Wallet
 //
-//  Created by FotoLockr on 02.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 02.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -12,6 +12,7 @@ import QRCodeReader
 import FontAwesome_swift
 
 final class SendViewController: BaseViewController<SendView> {
+    private static let allSymbol = "All"
     private lazy var readerVC: QRCodeReaderViewController = {
         let builder = QRCodeReaderViewControllerBuilder {
             $0.reader = QRCodeReader(metadataObjectTypes: [.qr], captureDevicePosition: .back)
@@ -21,10 +22,18 @@ final class SendViewController: BaseViewController<SendView> {
     }()
     private let estimatedFeeCalculation: EstimatedFeeCalculable
     private let transactionCreation: TransactionCreatableProtocol
-    private let priority: TransactionPriority
+    private var priority: TransactionPriority {
+        return account.transactionPriority
+    }
+    private var currency: Currency {
+        return account.currency
+    }
+    private let account: Account
     private let rateTicker: RateTicker
     private var address: String
     private var amount: String
+    private var wallet: WalletProtocol
+    private let unlockedBalanceLabel: UILabel
     private var rateAmount: String {
         get {
             return contentView.amountInAnotherCuncurrencyTextField.text ?? ""
@@ -44,58 +53,76 @@ final class SendViewController: BaseViewController<SendView> {
         }
     }
     
-    convenience init(accountSettings: AccountSettingsConfigurable, estimatedFeeCalculation: EstimatedFeeCalculable, transactionCreation: TransactionCreatableProtocol, rateTicker: RateTicker) {
-        self.init(
-            transactionPriority: accountSettings.transactionPriority,
-            estimatedFeeCalculation: estimatedFeeCalculation,
-            transactionCreation: transactionCreation,
-            rateTicker: rateTicker)
+    convenience init(address: String, amount: Amount, account: Account, estimatedFeeCalculation: EstimatedFeeCalculable, transactionCreation: TransactionCreatableProtocol, rateTicker: RateTicker) {
+        self.init(account: account, estimatedFeeCalculation: estimatedFeeCalculation, transactionCreation: transactionCreation, rateTicker: rateTicker)
+        setAddress(address)
+        setAmount(amount)
     }
     
-    init(transactionPriority: TransactionPriority, estimatedFeeCalculation: EstimatedFeeCalculable, transactionCreation: TransactionCreatableProtocol, rateTicker: RateTicker) {
-        self.priority = transactionPriority
+    init(account: Account, estimatedFeeCalculation: EstimatedFeeCalculable, transactionCreation: TransactionCreatableProtocol, rateTicker: RateTicker) {
+        self.account = account
+        self.wallet = account.currentWallet
         self.estimatedFeeCalculation = estimatedFeeCalculation
         self.transactionCreation = transactionCreation
         self.rateTicker = rateTicker
         address = ""
         amount = ""
+        unlockedBalanceLabel = UILabel(font: .avenirNextMedium(size: 15))
         super.init()
     }
     
-    override func configureBinds() {
+    override func configureDescription() {
         title = "Send"
+        updateTabBarIcon(name: .paperPlane)
+    }
+
+    override func configureBinds() {
+        unlockedBalanceLabel.numberOfLines = 0
         
-        contentView.feePriorityDescriptionLabel.text = "Currently the fee is set at \(priority.stringify()) priority. Transaction priority can be adjusted in the settings."
-        
-        estimatedFeeCalculation.calculateEstimatedFee(forPriority: priority)
-            .then(on: DispatchQueue.main) { [weak self] amount in
-                self?.contentView.estimatedValueLabel.text = amount.formatted()
-            }.catch(on: DispatchQueue.main) { [weak self] error in
-                self?.showError(error)
+        wallet.observe { [weak self] (change, wallt) in
+            switch change {
+            case let .changedUnlockedBalance(unlockedBalance):
+                self?.updateUnlockedBalance(unlockedBalance)
+            default:
+                break
+            }
         }
         
+        calculateEstimatedFee()
+        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: unlockedBalanceLabel)
+        updateUnlockedBalance(wallet.unlockedBalance)
         contentView.sendButton.addTarget(self, action: #selector(send), for: .touchUpInside)
         contentView.qrScanButton.addTarget(self, action: #selector(scanAddressFromQr), for: .touchUpInside)
         contentView.addressTextField.addTarget(self, action: #selector(onAddressTextChange(_:)), for: .editingChanged)
         contentView.amountInMoneroTextField.addTarget(self, action: #selector(onAmountTextChange(_:)), for: .editingChanged)
         contentView.amountInAnotherCuncurrencyTextField.addTarget(self, action: #selector(onAlternativeAmountTextChange(_:)), for: .editingChanged)
+        contentView.allAmountButton.addTarget(self, action: #selector(setAllAmount), for: .touchUpInside)
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        calculateEstimatedFee()
+        contentView.amountInAnotherCuncurrencyTextField.title = "\(currency.stringify().uppercased()) (approximate)"
+        contentView.amountInAnotherCuncurrencyTextField.placeholder = "\(currency.stringify().uppercased()): 0.00"
+        contentView.feePriorityDescriptionLabel.text = "Currently the fee is set at \(priority.stringify()) priority. Transaction priority can be adjusted in the settings."
+    }
+    
+    private func updateUnlockedBalance(_ unlockedBalance: Amount) {
+        unlockedBalanceLabel.text = "XMR \(unlockedBalance.formatted())"
     }
     
     @objc
     private func scanAddressFromQr() {
         readerVC.completionBlock = { [weak self] result in
-            // FIX-ME: HARDCODED VALUES FOR MONERO
-            
-            if
-                var address = result?.value,
-                address.hasPrefix("monero:"),
-                let range = address.range(of: "monero:") {
-                address.removeSubrange(range)
-                self?.contentView.addressTextField.text = address
-                self?.address = address
-            } else if let address = result?.value {
-                self?.contentView.addressTextField.text = address
-                self?.address = address
+            if let value = result?.value {
+                let result = MoneroQRResult(value: value)
+                self?.setAddress(result.address)
+                
+                if let amount = result.amount {
+                    self?.setAmount(amount)
+                }
+                
+                self?.setPaymentId(result.paymentId)
             }
             
             self?.readerVC.stopScanning()
@@ -143,14 +170,42 @@ final class SendViewController: BaseViewController<SendView> {
         contentView.amountInMoneroTextField.text = amount
     }
     
+    @objc
+    private func setAllAmount() {
+        amount = "All"
+        contentView.amountInMoneroTextField.text = SendViewController.allSymbol
+        contentView.amountInAnotherCuncurrencyTextField.text = "--\(SendViewController.allSymbol)--"
+    }
+    
+    private func setAmount(_ amount: Amount) {
+        contentView.amountInMoneroTextField.text = amount.formatted()
+        self.amount = amount.formatted()
+        onAmountTextChange(contentView.amountInMoneroTextField)
+    }
+    
+    private func setPaymentId(_ paymentId: String?) {
+        contentView.paymenyIdTextField.text = paymentId
+        
+        if let paymentId = paymentId {
+            self.paymentId = paymentId
+        }
+    }
+    
+    private func setAddress(_ address: String) {
+        contentView.addressTextField.text = address
+        self.address = address
+    }
+    
     private func createTransaction() {
         let alert = UIAlertController.showSpinner(message: "Creating transaction")
         parent?.present(alert, animated: true)
-        
+        let amount = self.amount.lowercased() == SendViewController.allSymbol.lowercased()
+            ? nil
+            : MoneroAmount(amount: self.amount.replacingOccurrences(of: ",", with: "."))
         transactionCreation.createTransaction(
             to: address,
             withPaymentId: paymentId,
-            amount: MoneroAmount(amount: amount.replacingOccurrences(of: ",", with: ".")),
+            amount: amount,
             priority: priority)
             .then(on: DispatchQueue.main) { [weak self] pendingTransaction -> Void in
                 alert.dismiss(animated: true) {
@@ -201,6 +256,26 @@ final class SendViewController: BaseViewController<SendView> {
         let ok = UIAlertAction(title: "Ok", style: .default)
         alert.addAction(ok)
         parent?.present(alert, animated: true)
+    }
+    
+    private func calculateEstimatedFee() {
+        estimatedFeeCalculation.calculateEstimatedFee(forPriority: priority)
+            .then(on: DispatchQueue.main) { [weak self] amount -> Void in
+                let estimatedValue: String
+                
+                if
+                    let rate = self?.rateTicker.rate,
+                    let currency = self?.currency {
+                    let ratedAmount = convertXMRtoUSD(amount: amount.formatted(), rate: rate)
+                    estimatedValue = "XMR \(amount.formatted()) (\(currency.symbol) \(ratedAmount))"
+                } else {
+                    estimatedValue = "XMR \(amount.formatted())"
+                }
+                
+                self?.contentView.estimatedValueLabel.text = estimatedValue
+            }.catch(on: DispatchQueue.main) { [weak self] error in
+                self?.showError(error)
+        }
     }
 }
 

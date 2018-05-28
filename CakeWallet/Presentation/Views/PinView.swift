@@ -2,8 +2,8 @@
 //  CircleView.swift
 //  Wallet
 //
-//  Created by FotoLockr on 27.09.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 27.09.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -49,7 +49,7 @@ final class PinView: UIView, PinableView {
     }
     
     func fill() {
-        circleShape?.strokeColor = UIColor.lightGreen.cgColor
-        circleShape?.fillColor = UIColor.lightGreen.cgColor
+        circleShape?.strokeColor = UIColor.pictonBlue.cgColor
+        circleShape?.fillColor = UIColor.pictonBlue.cgColor
     }
 }

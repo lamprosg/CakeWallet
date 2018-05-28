@@ -2,8 +2,8 @@
 //  SetupPinPasswordViewController.swift
 //  Wallet
 //
-//  Created by FotoLockr on 12/1/17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 12/1/17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -51,7 +51,7 @@ final class SetupPinPasswordViewController: BaseViewController<BaseView> {
     }
     
     private func showSuccessAlert() {
-        let alert = UIAlertController(title: nil, message: "Pin password set up successfully", preferredStyle: .alert)
+        let alert = UIAlertController(title: nil, message: "Your PIN has been set up successfully", preferredStyle: .alert)
         let ok = UIAlertAction(title: "Ok", style: .default) { _ in
             self.reset()
             self.setuped?()

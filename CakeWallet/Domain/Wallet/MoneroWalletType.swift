@@ -2,17 +2,25 @@
 //  MoneroWalletType.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 31.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 31.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import Foundation
 import PromiseKit
+import SystemConfiguration
 
 let moneroBlockSize = 1000
-private let updateQueue = DispatchQueue(label: "com.fotolockr.com.cakewallet.updateQueue", qos: .background)
+private let updateQueue = DispatchQueue(
+    label: "io.cakewallet.updateQueue",
+    qos: .utility,
+    attributes: .concurrent)
 
 final class MoneroWalletType: WalletProtocol {
+    static func generatePaymentId() -> String {
+        return MoneroWalletAdapter.generatePaymentId()
+    }
+    
     var name: String {
         return moneroAdapter.name()
     }
@@ -34,7 +42,12 @@ final class MoneroWalletType: WalletProtocol {
     }
     
     var isConnected: Bool {
-        return moneroAdapter.connectionStatus() == 1
+        return moneroAdapter.connectionStatus() != 0
+//        if let settings = self.settings {
+//            return checkConnectionSync(toUri: settings.uri)
+//        } else {
+//            return false
+//        }
     }
     
     var isUpdateStarted: Bool {
@@ -56,18 +69,31 @@ final class MoneroWalletType: WalletProtocol {
         }
     }
     
-    private(set) var currentHeight: UInt64
+    var spendKey: WalletKey {
+        return WalletKey(pub: self.moneroAdapter.publicSpendKey(), sec: self.moneroAdapter.secretSpendKey())
+    }
+    
+    var viewKey: WalletKey {
+        return WalletKey(pub: self.moneroAdapter.publicViewKey(), sec: self.moneroAdapter.secretViewKey())
+    }
+    
+    var isWatchOnly: Bool {
+        return spendKey.sec.range(of: "^0*$", options: .regularExpression, range: nil, locale: nil) != nil
+    }
+    
     var status: NetworkStatus {
         didSet {
             self.emit(.changedStatus(status))
             
-            if case NetworkStatus.updated = status {
+            if case NetworkStatus.updated = status {                
                 if isNew {
                     isNew = false
                 }
             }
         }
     }
+    
+    private(set) var currentHeight: UInt64
     
     private(set) var isNew: Bool {
         didSet {
@@ -84,8 +110,13 @@ final class MoneroWalletType: WalletProtocol {
     
     private(set) var isRecovery: Bool
     private var password: String
+    private var _blockchainHeight: UInt64
+    private var _blockchainHeightUpdateDate: Date?
+    private var _isFetchingBlockChainHeight: Bool
     private var listeners: [ChangeHandler]
+    private var initialCurrentHeight: UInt64
     private var _moneroTransactionHistory: MoneroTransactionHistory?
+    private var settings: ConnectionSettings?
     private let moneroAdapter: MoneroWalletAdapter
     private let keychainStorage: KeychainStorage
     
@@ -95,9 +126,14 @@ final class MoneroWalletType: WalletProtocol {
         self.password = password
         self.isRecovery = isRecovery
         self.keychainStorage = keychainStorage
+        settings = nil
         listeners = []
         status = .notConnected
         isNew = true
+        initialCurrentHeight = 0
+        _blockchainHeight = 0
+        _blockchainHeightUpdateDate = nil
+        _isFetchingBlockChainHeight = false
         
         if
             let isNewStr = try? self.keychainStorage.fetch(forKey: .isNew(WalletIndex(name: name))),
@@ -122,19 +158,22 @@ final class MoneroWalletType: WalletProtocol {
     }
     
     func connect(withSettings settings: ConnectionSettings, updateState: Bool) -> Promise<Void> {
+        print("connect")
         return Promise { fulfill, reject in
             DispatchQueue.global(qos: .background).async {
                 do {
                     if updateState {
                         self.status = .connecting
                     }
-                    
+                    self.settings = settings
+                    print(settings.uri)
                     self.moneroAdapter.setDaemonAddress(settings.uri, login: settings.login, password: settings.password)
                     try self.moneroAdapter.connectToDaemon()
                     
                     if updateState {
                         self.status = .connected
                     }
+                    
                     
                     fulfill(())
                 } catch {
@@ -170,13 +209,18 @@ final class MoneroWalletType: WalletProtocol {
         }
     }
     
+    func clear() {
+        listeners = []
+        moneroAdapter.clear()
+        moneroAdapter.delegate = nil
+    }
+    
     func close() {
-        // Hardcode value: always save wallet on close.
-        self.moneroAdapter.close(true)
+        self.moneroAdapter.close()
     }
     
     func createTransaction(to address: String, withPaymentId paymentId: String,
-                           amount: Amount, priority: TransactionPriority) -> Promise<PendingTransaction> {
+                           amount: Amount?, priority: TransactionPriority) -> Promise<PendingTransaction> {
         return Promise { fulfill, reject in
             DispatchQueue.global(qos: .background).async {
                 do {
@@ -184,7 +228,7 @@ final class MoneroWalletType: WalletProtocol {
                     let moneroPendingTransactionAdapter = try self.moneroAdapter.createTransaction(
                         toAddress: address,
                         withPaymentId: paymentId,
-                        amountStr: amount.formatted(),
+                        amountStr: amount?.formatted(),
                         priority: priorityRaw)
                     let moneroPendingTransaction = MoneroPendingTransaction(moneroPendingTransactionAdapter: moneroPendingTransactionAdapter)
                     fulfill(moneroPendingTransaction)
@@ -227,79 +271,167 @@ final class MoneroWalletType: WalletProtocol {
         return moneroTransactionHistory
     }
     
-    func fetchBlockChainHeight() -> UInt64 {
-//        let now = Date().timeIntervalSince1970
-//
-//        if (_cachedBlockChainHeight == 0 ||
-//            currentHeight > _cachedBlockChainHeight ||
-//            now - blockChainHeightUpdateInterval > 60) {
-//            _cachedBlockChainHeight = moneroAdapter.daemonBlockChainHeight()
-//            blockChainHeightUpdateInterval = now
-//        }
+    func fetchBlockChainHeight(compilation: @escaping (UInt64) -> Void) {
+        if _blockchainHeightUpdateDate == nil {
+            _blockchainHeight = moneroAdapter.daemonBlockChainHeight()
+            
+            if _blockchainHeight == 0 {
+                _fetchBlockChainHeight() { [weak self] height in
+                    self?._blockchainHeight = height
+                    self?._blockchainHeightUpdateDate = Date()
+                    compilation(height)
+                }
+            } else {
+                _blockchainHeightUpdateDate = Date()
+                compilation(_blockchainHeight)
+            }
+        }
         
-        return moneroAdapter.daemonBlockChainHeight()
+        if let date = _blockchainHeightUpdateDate,
+            _blockchainHeight == 0 || Date().timeIntervalSince(date) >= 10 {
+            _blockchainHeight = moneroAdapter.daemonBlockChainHeight()
+        
+            if _blockchainHeight == 0 {
+                _fetchBlockChainHeight() { [weak self] height in
+                    self?._blockchainHeight = height
+                    self?._blockchainHeightUpdateDate = Date()
+                    compilation(height)
+                }
+            } else {
+                _blockchainHeightUpdateDate = Date()
+                compilation(_blockchainHeight)
+            }
+        } else {
+            compilation(_blockchainHeight)
+        }
+    }
+    
+    func integratedAddress(for paymentId: String) -> String {
+        return self.moneroAdapter.integratedAddress(for: paymentId)
     }
     
     private func emit(_ change: MoneroWalletChange) {
         listeners.forEach { $0(change, self) }
     }
+    
+    private func _fetchBlockChainHeight(compilation: @escaping (UInt64) -> Void) {
+        guard !_isFetchingBlockChainHeight else {
+            return
+        }
+        
+        if let settings = self.settings {
+            let urlString = "http://\(settings.uri)/json_rpc"
+            let url = URL(string: urlString)
+            var request = URLRequest(url: url!)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            let requestBody = [
+                "jsonrpc": "2.0",
+                "id": "0",
+                "method": "getblockcount"
+            ]
+            
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: requestBody, options: .prettyPrinted)
+                request.httpBody = jsonData
+            } catch {
+               compilation(0)
+            }
+
+            let connection = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                do {
+                    self?._isFetchingBlockChainHeight = false
+                    
+                    guard let data = data,
+                        error == nil else {
+                            compilation(0)
+                            return
+                    }
+                    
+                    if
+                        let decoded = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                        let result = decoded["result"] as? [String: Any],
+                        let height = result["count"] as? UInt64 {
+                        compilation(height)
+                    } else {
+                        compilation(0)
+                    }
+                } catch {
+                    compilation(0)
+                }
+            }
+            _isFetchingBlockChainHeight = true
+            connection.resume()
+        } else {
+            compilation(0)
+        }
+    }
 }
 
 extension MoneroWalletType: MoneroWalletAdapterDelegate {
     func newBlock(_ block: UInt64) {
+        if initialCurrentHeight == 0 {
+            initialCurrentHeight = block
+        }
         self.currentHeight = block
         let newBlock = Block(height: block)
-        let blockchainHeight = self.fetchBlockChainHeight()
-        let progress = { () -> Float in
-            let _diff = Float(block) / Float(blockchainHeight)
-            return _diff > 1.00 ? 1.00 : _diff
-        }()
-        let updatingProgress = UpdatingProgress(block: newBlock, progress: progress)
-        
-        
-        switch status {
-        case .notConnected, .failedConnection(_):
-            return
-        default:
-            break
-        }
-        
-        if case .updating = self.status {} else {
-            status = .startUpdating
-        }
-        
-        updateQueue.async {
-            self.status = .updating(updatingProgress)
+        self.fetchBlockChainHeight() { [weak self] blockchainHeight in
+            guard
+                let initialCurrentHeight = self?.initialCurrentHeight,
+                let status = self?.status else {
+                    return
+            }
+            
+            let updatingProgress = NewBlockUpdate(
+                block: newBlock,
+                initialBlock: Block(height: initialCurrentHeight),
+                lastBlock: Block(height: blockchainHeight))
+            
+            switch status {
+            case .notConnected, .failedConnection(_):
+                return
+            default:
+                break
+            }
+            
+            if case .updating = status {} else {
+                self?.status = .startUpdating
+            }
+            
+            updateQueue.async {
+                self?.status = .updating(updatingProgress)
+            }
         }
     }
     
     func refreshed() {
         updateQueue.async {
-            let blockChainHeight = self.fetchBlockChainHeight()
-            let diff: Int = Int(blockChainHeight) - Int(self.currentHeight)
-            self.emit(.changedBalance(self.balance))
-            self.emit(.changedUnlockedBalance(self.unlockedBalance))
-            
-            switch self.status {
-            case .failedConnection(_), .notConnected, .connecting:
-                break
-            default:
-                if diff == blockChainHeight {
-                    self.currentHeight = blockChainHeight
-                    self.status = .updated
-                    _ = self.save()
-                    return
+            self.fetchBlockChainHeight() { blockChainHeight in
+                let diff: Int = Int(blockChainHeight) - Int(self.currentHeight)
+                self.emit(.changedBalance(self.balance))
+                self.emit(.changedUnlockedBalance(self.unlockedBalance))
+
+                switch self.status {
+                case .failedConnection(_), .notConnected, .connecting:
+                    break
+                default:
+                    if diff == blockChainHeight {
+                        self.currentHeight = blockChainHeight
+                        self.status = .updated
+                        _ = self.save()
+                        return
+                    }
                 }
-            }
-            
-            switch self.status {
-            case .updating(_), .startUpdating:
-                if diff <= moneroBlockSize {
-                    self.status = .updated
-                    _ = self.save()
+                
+                switch self.status {
+                case .updating(_), .startUpdating:
+                    if diff <= moneroBlockSize {
+                        self.status = .updated
+                        _ = self.save()
+                    }
+                default:
+                    break
                 }
-            default:
-                break
             }
         }
     }

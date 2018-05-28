@@ -2,8 +2,8 @@
 //  RecoveryView.swift
 //  Wallet
 //
-//  Created by FotoLockr on 15.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 15.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //w
 
 import UIKit
@@ -14,12 +14,14 @@ final class RecoveryView: BaseView {
     let seedTextView: UITextView
     let confirmButton: UIButton
     let placeholderLabel : UILabel
+    let restoreFromHeightView: RestoreFromHeightView
     
     required init() {
         walletNameTextField = FloatingLabelTextField(placeholder: "Enter wallets name", title: "Wallet name")
         seedTextView = UITextView()
         confirmButton = PrimaryButton(title: "Recover")
-        placeholderLabel = UILabel(font: UIFont.avenirNextMedium(size: 17))
+        placeholderLabel = UILabel()
+        restoreFromHeightView = RestoreFromHeightView()
         super.init()
     }
     
@@ -33,13 +35,15 @@ final class RecoveryView: BaseView {
         placeholderLabel.textColor = .lightGray
         placeholderLabel.isHidden = !seedTextView.text.isEmpty
         
-        seedTextView.font = UIFont.avenirNextMedium(size: 17)
+        seedTextView.font = .avenirNextMedium(size: 15)
         seedTextView.backgroundColor = .groupTableViewBackground
         seedTextView.layer.masksToBounds = true
         seedTextView.layer.cornerRadius = 10
+        
         addSubview(walletNameTextField)
         addSubview(seedTextView)
         addSubview(confirmButton)
+        addSubview(restoreFromHeightView)
     }
     
     override func configureConstraints() {
@@ -57,8 +61,14 @@ final class RecoveryView: BaseView {
             make.height.equalTo(150)
         }
         
-        walletNameTextField.snp.makeConstraints { make in
+        restoreFromHeightView.snp.makeConstraints { make in
             make.bottom.equalTo(seedTextView.snp.top).offset(-20)
+            make.width.equalTo(seedTextView.snp.width)
+            make.leading.equalToSuperview().offset(20)
+        }
+        
+        walletNameTextField.snp.makeConstraints { make in
+            make.bottom.equalTo(restoreFromHeightView.snp.top).offset(-20)
             make.leading.equalTo(seedTextView.snp.leading)
             make.trailing.equalTo(seedTextView.snp.trailing)
         }

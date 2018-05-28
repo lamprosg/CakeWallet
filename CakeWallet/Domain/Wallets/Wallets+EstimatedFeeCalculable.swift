@@ -2,8 +2,8 @@
 //  Wallets+EstimatedFeeCalculable.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 27.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 27.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import Foundation
@@ -20,14 +20,7 @@ extension Wallets: EstimatedFeeCalculable {
                 return
             }
             
-            guard let connectionSettings = ConnectionSettings.loadSavedSettings() else {
-                
-                // FIX-ME: Incorrect implementation. Need take ConnectionSettings from dependency and need throw error to reject()
-                
-                fulfill(MoneroAmount(value: 0))
-                return
-            }
-            
+            let connectionSettings = ConnectionSettings.loadSavedSettings()
             fetchFeePerKb(connectionSettings: connectionSettings)
                 .then { feePerKb -> Void in
                     let kb = UInt64((estimatedSizeOfDefaultTransaction + 1023) / 1024) // Round to kb

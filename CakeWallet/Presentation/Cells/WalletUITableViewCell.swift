@@ -2,8 +2,8 @@
 //  WalletUITableCell.swift
 //  Wallet
 //
-//  Created by FotoLockr on 24.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 24.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -19,6 +19,11 @@ final class WalletUITableViewCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
     
+    override func configureView() {
+        super.configureView()
+        textLabel?.font = UIFont.avenirNextMedium(size: 15)
+    }
+    
     override func configureConstraints() {
         textLabel?.snp.makeConstraints { make in
             make.centerY.equalToSuperview()
@@ -27,7 +32,11 @@ final class WalletUITableViewCell: UITableViewCell {
         }
     }
     
-    func configure(name: String) {
-        textLabel?.text = name
+    func configure(name: String, isWatchOnly: Bool) {
+        if isWatchOnly {
+            textLabel?.text = "\(name) (watch-only)"
+        } else {
+            textLabel?.text = name
+        }
     }
 }

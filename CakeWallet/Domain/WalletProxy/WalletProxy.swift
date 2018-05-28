@@ -2,26 +2,24 @@
 //  WalletProxy.swift
 //  CakeWallet
 //
-//  Created by FotoLockr on 27.01.2018.
-//  Copyright © 2018 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 27.01.2018.
+//  Copyright © 2018 Cake Technologies. 
 //
 
 import Foundation
 import PromiseKit
+import FontAwesome_swift
 
 private let backgroundConnectionQueue = DispatchQueue(
-    label: "com.fotolockr.com.cakewallet.backgroundConnectionQueue",
-    qos: .background,
+    label: "io.cakewallet.backgroundConnectionQueue",
+    qos: .utility,
     attributes: .concurrent)
-private let backgroundConnectionTimerQueue = DispatchQueue(
-    label: "com.fotolockr.com.cakewallet.backgroundConnectionTimerQueue",
+let backgroundConnectionTimerQueue = DispatchQueue(
+    label: "io.cakewallet.backgroundConnectionTimerQueue",
     qos: .background,
     attributes: .concurrent)
 private let failedConnectionDelay: TimeInterval = 120 // 2 mins
-
-private let timer = UTimer(deadline: .now(), repeating: .seconds(3), queue: backgroundConnectionTimerQueue) {
-    
-}
+private var timer: UTimer?
 
 final class WalletProxy: Proxable, WalletProtocol {
     var name: String {
@@ -57,20 +55,33 @@ final class WalletProxy: Proxable, WalletProtocol {
     var isConnected: Bool {
         return origin.isConnected
     }
+    var spendKey: WalletKey {
+        return origin.spendKey
+    }
+    var viewKey: WalletKey {
+        return origin.viewKey
+    }
+    var isWatchOnly: Bool {
+        return origin.isWatchOnly
+    }
     
     private(set) var origin: WalletProtocol
     private var listeners: [ChangeHandler]
     
     init(origin: WalletProtocol) {
         self.origin = origin
-        self.listeners = []
+        listeners = []
     }
     
     func `switch`(origin: WalletProtocol) {
-        self.origin.close()
+        //        self.origin.close()
+        //        self.origin.clear()
+        let oldWallet = self.origin
         self.origin = origin
         observeOrigin()
         onWalletChange()
+        oldWallet.close()
+        oldWallet.clear()
     }
     
     func save() -> Promise<Void> {
@@ -85,7 +96,7 @@ final class WalletProxy: Proxable, WalletProtocol {
         return origin.changePassword(oldPassword: oldPassword, newPassword: newPassword)
     }
     
-    func createTransaction(to address: String, withPaymentId paymentId: String, amount: Amount,
+    func createTransaction(to address: String, withPaymentId paymentId: String, amount: Amount?,
                            priority: TransactionPriority) -> Promise<PendingTransaction> {
         return origin.createTransaction(to: address, withPaymentId: paymentId, amount: amount, priority: priority)
     }
@@ -107,6 +118,14 @@ final class WalletProxy: Proxable, WalletProtocol {
         return origin.transactionHistory()
     }
     
+    func clear() {
+        origin.clear()
+    }
+    
+    func integratedAddress(for paymentId: String) -> String {
+        return origin.integratedAddress(for: paymentId)
+    }
+    
     private func observeOrigin() {
         origin.observe { [weak self] change, origin in
             DispatchQueue.main.async {
@@ -120,53 +139,75 @@ final class WalletProxy: Proxable, WalletProtocol {
         
         var isConnecting = false
         var isFirstConnect = true
-        timer.suspend()
-        timer.listener = { [weak self] in
-            guard let this = self else {
+        timer?.suspend()
+        timer = UTimer(deadline: .now(), repeating: .seconds(3), queue: backgroundConnectionTimerQueue)
+        timer?.listener = { [weak self] in
+            let settings = ConnectionSettings.loadSavedSettings()
+            let canConnect = checkConnectionSync(toUri: settings.uri)
+            guard let status = self?.status else { return }
+            
+            guard canConnect else {
+                switch status {
+                case .failedConnection(_), .failedConnectionNext:
+                    self?.status = .failedConnectionNext
+                default:
+                    let now = Date()
+                    self?.status = .failedConnection(now)
+                }
                 return
             }
             
-            if isFirstConnect || (!this.isConnected && !isConnecting) {
-                guard let settings = ConnectionSettings.loadSavedSettings() else {
+            guard let isConnected = self?.isConnected else { return }
+            
+            if isFirstConnect || (!isConnecting && !isConnected) {
+                guard !isAutoNodeSwitching else {
                     return
                 }
                 
                 isConnecting = true
-                
-                this.connect(withSettings: settings, updateState: false)
+                self?.connect(withSettings: settings, updateState: false)
                     .always {
                         if isFirstConnect {
                             isFirstConnect = false
                         }
                     }.then { _ -> Void in
-                        this.startUpdate()
+                        self?.startUpdate()
                         isConnecting = false
-                        this.status = .connected
+                        self?.status = .connected
                     }.catch { error in
                         print("Connection error: \(error.localizedDescription)")
-                        
-                        switch this.status {
+                        switch status {
                         case .failedConnection(_):
-                            break
+                            self?.status = .failedConnectionNext
                         default:
                             let now = Date()
-                            this.status = .failedConnection(now)
+                            self?.status = .failedConnection(now)
                         }
                         
                         isConnecting = false
                 }
-            } else if this.isConnected {
-                switch this.status {
+            } else if canConnect {
+                switch status {
                 case .startUpdating, .updated, .updating(_):
                     break
                 default:
-                    this.startUpdate()
+                    self?.startUpdate()
                 }
-            } else if isConnecting && !this.isConnected {
+            } else if isConnecting && !canConnect {
                 isConnecting = false
+                
+                if let status = self?.status {
+                    switch status {
+                    case .failedConnection, .notConnected, .failedConnectionNext:
+                        break
+                    default:
+                        let now = Date()
+                        self?.status = .failedConnection(now)
+                    }
+                }
             }
         }
         
-        timer.resume()
+        timer?.resume()
     }
 }

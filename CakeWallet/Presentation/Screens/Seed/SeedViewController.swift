@@ -2,8 +2,8 @@
 //  MnemoticViewController.swift
 //  Wallet
 //
-//  Created by FotoLockr on 02.10.17.
-//  Copyright © 2017 FotoLockr. All rights reserved.
+//  Created by Cake Technologies 02.10.17.
+//  Copyright © 2017 Cake Technologies. 
 //
 
 import UIKit
@@ -15,9 +15,15 @@ final class SeedViewController: BaseViewController<SeedView> {
     var finishHandler: VoidEmptyHandler
     private var walletIndex: WalletIndex?
     private let seed: String
+    private let name: String
     
-    init(seed: String) {
+    convenience init(wallet: WalletProtocol) {
+        self.init(seed: wallet.seed, name: wallet.name)
+    }
+    
+    init(seed: String, name: String) {
         self.seed = seed
+        self.name = name
         super.init()
     }
     
@@ -31,17 +37,8 @@ final class SeedViewController: BaseViewController<SeedView> {
         let shareButton = UIBarButtonItem(barButtonSystemItem: .action, target: self, action: #selector(showMenu))
         navigationItem.rightBarButtonItem = shareButton
         contentView.seedTextView.text = seed
-        
-        if isModal {
-            let closeButton = UIBarButtonItem(
-                image: UIImage.fontAwesomeIcon(name: .close, textColor: .gray, size: CGSize(width: 36, height: 36)),
-                style: .done,
-                target: self, action: #selector(close))
-            contentView.finishButton.isHidden = true
-            navigationItem.leftBarButtonItem = closeButton
-        } else {
-            contentView.finishButton.addTarget(self, action: #selector(close), for: .touchUpInside)
-        }
+        contentView.nameLabel.text = name
+        navigationItem.leftBarButtonItem = UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(close))
     }
     
     @objc
